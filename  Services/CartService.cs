@@ -13,94 +13,137 @@ namespace CoffeeShop.Services
             _context = context;
         }
 
-        // ADD TO CART (WITH STOCK VALIDATION) 
         public async Task<string> AddToCart(int userId, int productId, int quantity)
         {
-            // 1. Check product exists
-            var product = await _context.Products.FindAsync(productId);
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                if (quantity <= 0) return "Quantity must be greater than 0";
 
-            if (product == null)
-                return "Product not found";
+                var product = await _context.Products.FindAsync(productId);
+                if (product == null) return "Product not found";
 
-            // 2. Check stock availability
-            if (product.StockQuantity <= 0)
-                return "Product out of stock";
+                if (product.StockQuantity < quantity)
+                    return $"Insufficient stock. Only {product.StockQuantity} available.";
 
-            // 3. Check requested quantity
-            if (quantity <= 0)
-                return "Quantity must be greater than 0";
+                var cart = await _context.Carts.FirstOrDefaultAsync(c => c.UserId == userId);
+                if (cart == null)
+                {
+                    cart = new Cart
+                    {
+                        UserId = userId,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+                    _context.Carts.Add(cart);
+                    await _context.SaveChangesAsync();
+                }
 
-            // 4. Check if enough stock
-            if (quantity > product.StockQuantity)
-                return $"Only {product.StockQuantity} items available in stock";
+                var existingItem = await _context.CartItems
+                    .FirstOrDefaultAsync(ci => ci.CartId == cart.Id && ci.ProductId == productId);
 
-            // 5. Get or create cart
+                if (existingItem != null)
+                {
+                    if (existingItem.Quantity + quantity > product.StockQuantity)
+                        return $"Limit reached. Total in cart ({existingItem.Quantity + quantity}) would exceed stock ({product.StockQuantity}).";
+
+                    existingItem.Quantity += quantity;
+                    _context.CartItems.Update(existingItem);
+                }
+                else
+                {
+                    var cartItem = new CartItem
+                    {
+                        CartId = cart.Id,
+                        ProductId = productId,
+                        Quantity = quantity
+                        // Yahan se CreatedAt hata diya gaya hai taake error na aaye
+                    };
+                    _context.CartItems.Add(cartItem);
+                }
+
+                cart.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return "Success: Product added to cart";
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return $"Error: {ex.Message}";
+            }
+        }
+
+        public async Task<object?> GetCart(int userId)
+        {
+            var cart = await _context.Carts
+                .Include(c => c.CartItems)
+                    .ThenInclude(ci => ci.Product)
+                .FirstOrDefaultAsync(c => c.UserId == userId);
+
+            if (cart == null) return null;
+
+            return new
+            {
+                cart.Id,
+                cart.UserId,
+                Items = cart.CartItems.Select(ci => new
+                {
+                    ci.Id,
+                    ci.ProductId,
+                    ProductName = ci.Product.Name,
+                    ImageUrl = ci.Product.ImageUrl,
+                    Price = ci.Product.Price,
+                    ci.Quantity,
+                    Total = ci.Product.Price * ci.Quantity
+                }).ToList()
+            };
+        }
+
+        public async Task<bool> RemoveItem(int cartItemId)
+        {
+            var item = await _context.CartItems.FindAsync(cartItemId);
+            if (item == null) return false;
+
+            _context.CartItems.Remove(item);
+            return await _context.SaveChangesAsync() > 0;
+        }
+
+        public async Task<bool> ClearCart(int userId)
+        {
             var cart = await _context.Carts
                 .Include(c => c.CartItems)
                 .FirstOrDefaultAsync(c => c.UserId == userId);
 
-            if (cart == null)
-            {
-                cart = new Cart
-                {
-                    UserId = userId,
-                    CartItems = new List<CartItem>()
-                };
+            if (cart == null || !cart.CartItems.Any()) return true;
 
-                _context.Carts.Add(cart);
-                await _context.SaveChangesAsync();
-            }
+            _context.CartItems.RemoveRange(cart.CartItems);
+            cart.UpdatedAt = DateTime.UtcNow;
 
-            // 6. Check if item already exists in cart
-            var existingItem = await _context.CartItems
-                .FirstOrDefaultAsync(ci => ci.CartId == cart.Id && ci.ProductId == productId);
-
-            if (existingItem != null)
-            {
-                // validate total quantity after update
-                if (existingItem.Quantity + quantity > product.StockQuantity)
-                    return $"Cannot add more than available stock ({product.StockQuantity})";
-
-                existingItem.Quantity += quantity;
-            }
-            else
-            {
-                var cartItem = new CartItem
-                {
-                    CartId = cart.Id,
-                    ProductId = productId,
-                    Quantity = quantity
-                };
-
-                _context.CartItems.Add(cartItem);
-            }
-
-            await _context.SaveChangesAsync();
-
-            return "Product added to cart";
+            return await _context.SaveChangesAsync() > 0;
         }
 
-        // GET CART 
-        public async Task<Cart> GetCart(int userId)
+        public async Task<string> ChangeItemQuantity(int cartItemId, int delta)
         {
-            return await _context.Carts
-                .Include(c => c.CartItems)
-                .ThenInclude(ci => ci.Product)
-                .FirstOrDefaultAsync(c => c.UserId == userId);
-        }
+            if (delta == 0) return "No quantity change requested";
 
-        //REMOVE ITEM 
-        public async Task<string> RemoveItem(int cartItemId)
-        {
-            var item = await _context.CartItems.FindAsync(cartItemId);
+            var cartItem = await _context.CartItems
+                .Include(ci => ci.Product)
+                .FirstOrDefaultAsync(ci => ci.Id == cartItemId);
 
-            if (item == null)
-                return "Item not found";
+            if (cartItem == null) return "Cart item not found";
 
-            _context.CartItems.Remove(item);
+            var nextQuantity = cartItem.Quantity + delta;
+            if (nextQuantity < 1) return "Quantity cannot be less than 1";
+
+            if (cartItem.Product.StockQuantity < nextQuantity)
+                return $"Insufficient stock. Only {cartItem.Product.StockQuantity} available.";
+
+            cartItem.Quantity = nextQuantity;
             await _context.SaveChangesAsync();
 
-            return "Item removed";
+            return "Success: Cart item quantity updated";
         }
     }
 }

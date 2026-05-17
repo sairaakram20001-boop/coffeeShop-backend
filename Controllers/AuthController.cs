@@ -22,7 +22,7 @@ namespace CoffeeShop.Controllers
             _authService = authService;
         }
 
-        // ---------------- REGISTER ----------------
+        // REGISTER 
         [HttpPost("register")]
         public async Task<IActionResult> Register(RegisterDto dto)
         {
@@ -46,7 +46,7 @@ namespace CoffeeShop.Controllers
             return Ok(new { message = "User registered successfully" });
         }
 
-        // ---------------- LOGIN ----------------
+        // LOGIN 
         [HttpPost("login")]
         public async Task<IActionResult> Login(LoginDto dto)
         {
@@ -73,7 +73,7 @@ namespace CoffeeShop.Controllers
             });
         }
 
-        // ---------------- PASSWORD HASH ----------------
+        // PASSWORD HASH 
         private string HashPassword(string password)
         {
             using var sha = SHA256.Create();

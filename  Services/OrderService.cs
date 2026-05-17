@@ -4,122 +4,137 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CoffeeShop.Services
 {
-	public class OrderService
-	{
-		private readonly AppDbContext _context;
+    public class OrderService
+    {
+        private readonly AppDbContext _context;
 
-		public OrderService(AppDbContext context)
-		{
-			_context = context;
-		}
+        public OrderService(AppDbContext context)
+        {
+            _context = context;
+        }
 
-		// PLACE ORDER 
-		public async Task<string> PlaceOrder(int userId)
-		{
-			var cart = await _context.Carts
-				.Include(c => c.CartItems)
-				.ThenInclude(ci => ci.Product)
-				.FirstOrDefaultAsync(c => c.UserId == userId);
+        public async Task<string> PlaceOrder(int userId)
+        {
+            // Start Transaction
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var cart = await _context.Carts
+                    .Include(c => c.CartItems)
+                    .ThenInclude(ci => ci.Product)
+                    .FirstOrDefaultAsync(c => c.UserId == userId);
 
-			if (cart == null || !cart.CartItems.Any())
-				return "Cart is empty";
+                if (cart == null || !cart.CartItems.Any())
+                    return "Cart is empty";
 
-			// Final stock re-check before order
-			foreach (var item in cart.CartItems)
-			{
-				var product = await _context.Products.FindAsync(item.ProductId);
+                // 1. Create the Order first
+                var order = new Order
+                {
+                    UserId = userId,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    Status = "Pending",
+                    TotalAmount = cart.CartItems.Sum(x => x.Quantity * x.Product.Price)
+                };
 
-				if (product == null)
-					return $"Product with ID {item.ProductId} not found";
+                _context.Orders.Add(order);
+                await _context.SaveChangesAsync();
 
-				if (product.StockQuantity < item.Quantity)
-					return $"{product.Name} has insufficient stock";
-			}
+                // 2. Process Items and Deduct Stock
+                foreach (var item in cart.CartItems)
+                {
+                    var product = await _context.Products.FindAsync(item.ProductId);
 
-			// Create order
-			var order = new Order
-			{
-				UserId = userId,
-				CreatedAt = DateTime.Now,
-				UpdatedAt = DateTime.Now,
-				Status = "Pending",
-				TotalAmount = cart.CartItems.Sum(x => x.Quantity * x.Product.Price)
-			};
+                    if (product == null || product.StockQuantity < item.Quantity)
+                    {
+                        throw new Exception(product == null ? "Product missing" : $"{product.Name} stock exhausted.");
+                    }
 
-			_context.Orders.Add(order);
-			await _context.SaveChangesAsync();
+                    product.StockQuantity -= item.Quantity; // Deduct Stock
 
-			// Create order items + deduct stock
-			foreach (var item in cart.CartItems)
-			{
-				var product = await _context.Products.FindAsync(item.ProductId);
+                    var orderItem = new OrderItem
+                    {
+                        OrderId = order.Id,
+                        ProductId = item.ProductId,
+                        Quantity = item.Quantity,
+                        Price = product.Price
+                    };
+                    _context.OrderItems.Add(orderItem);
+                }
 
-				product.StockQuantity -= item.Quantity;
+                // 3. Cleanup
+                _context.CartItems.RemoveRange(cart.CartItems);
+                await _context.SaveChangesAsync();
 
-				var orderItem = new OrderItem
-				{
-					OrderId = order.Id,
-					ProductId = item.ProductId,
-					Quantity = item.Quantity,
-					Price = product.Price
-				};
+                await transaction.CommitAsync();
+                return $"Order #{order.Id} placed successfully";
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return $"Checkout failed: {ex.Message}";
+            }
+        }
 
-				_context.OrderItems.Add(orderItem);
-			}
+        public async Task<string> CancelOrder(int orderId)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var order = await _context.Orders
+                    .Include(o => o.OrderItems)
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
 
-			// Clear cart after successful order
-			_context.CartItems.RemoveRange(cart.CartItems);
+                if (order == null) return "Order not found";
+                if (order.Status != "Pending") return $"Cannot cancel order with status: {order.Status}";
 
-			await _context.SaveChangesAsync();
+                // 1. Reverse Stock
+                foreach (var item in order.OrderItems)
+                {
+                    var product = await _context.Products.FindAsync(item.ProductId);
+                    if (product != null)
+                    {
+                        product.StockQuantity += item.Quantity;
+                    }
+                }
 
-			return "Order placed successfully";
-		}
+                // 2. Update Status
+                order.Status = "Cancelled";
+                order.UpdatedAt = DateTime.UtcNow;
 
-		// ORDER HISTORY
-		public async Task<List<Order>> GetOrders(int userId)
-		{
-			return await _context.Orders
-				.Include(o => o.OrderItems)
-				.ThenInclude(oi => oi.Product)
-				.Where(o => o.UserId == userId)
-				.ToListAsync();
-		}
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+                return "Order cancelled successfully and stock returned.";
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return $"Cancellation failed: {ex.Message}";
+            }
+        }
 
-		// CANCEL ORDER
-		public async Task<string> CancelOrder(int orderId)
-		{
-			var order = await _context.Orders
-				.Include(o => o.OrderItems)
-				.FirstOrDefaultAsync(o => o.Id == orderId);
+        public async Task<object> GetOrders(int userId)
+        {
+            var orders = await _context.Orders
+                .Include(o => o.OrderItems)
+                    .ThenInclude(oi => oi.Product)
+                .Where(o => o.UserId == userId)
+                .OrderByDescending(o => o.CreatedAt)
+                .ToListAsync();
 
-			if (order == null)
-				return "Order not found";
-
-			if (order.Status == "Cancelled")
-				return "Order already cancelled";
-
-			if (order.Status == "Delivered")
-				return "Delivered orders cannot be cancelled";
-
-			if (order.Status == "Shipped")
-				return "Shipped orders cannot be cancelled";
-
-			foreach (var item in order.OrderItems)
-			{
-				var product = await _context.Products.FindAsync(item.ProductId);
-
-				if (product == null)
-					return $"Product with ID {item.ProductId} not found";
-
-				product.StockQuantity += item.Quantity;
-			}
-
-			order.Status = "Cancelled";
-			order.UpdatedAt = DateTime.Now;
-
-			await _context.SaveChangesAsync();
-
-			return "Order cancelled successfully";
-		}
-	}
+            return orders.Select(o => new {
+                o.Id,
+                o.Status,
+                o.TotalAmount,
+                o.CreatedAt,
+                Items = o.OrderItems.Select(oi => new {
+                    oi.ProductId,
+                    ProductName = oi.Product.Name,
+                    oi.Quantity,
+                    oi.Price,
+                    SubTotal = oi.Quantity * oi.Price
+                })
+            });
+        }
+    }
 }

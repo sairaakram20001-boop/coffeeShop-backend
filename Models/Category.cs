@@ -16,6 +16,6 @@ namespace CoffeeShop.Models
     public DateTime? DeletedAt { get; set; }
 
     // Navigation Property
-    public ICollection<Product> Products { get; set; }
+    //public ICollection<Product> Products { get; set; }
 }
 }

@@ -19,6 +19,10 @@ namespace CoffeeShop.Models
 
         public int Stock { get; set; }
 
+        public int StockQuantity { get; set; }
+
+        public string? ImageUrl { get; set; }
+
         public DateTime CreatedAt { get; set; }
 
         public DateTime UpdatedAt { get; set; }
@@ -31,7 +35,5 @@ namespace CoffeeShop.Models
         public ICollection<CartItem> CartItems { get; set; }
 
         public ICollection<OrderItem> OrderItems { get; set; }
-        public int StockQuantity { get; set; }
     }
-
 }
