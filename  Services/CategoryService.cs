@@ -83,7 +83,7 @@ namespace CoffeeShop.Services
             return rowsAffected > 0;
         }
 
-        // --- HELPER METHOD: Yeh "Map" error ko fix karega ---
+        //  HELPER METHOD: Yeh "Map" error ko fix karega 
         private CategoryDto MapToDto(Category category)
         {
             return new CategoryDto

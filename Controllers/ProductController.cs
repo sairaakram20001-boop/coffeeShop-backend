@@ -68,7 +68,15 @@ namespace CoffeeShop.Controllers
             return Ok(product);
         }
 
-        // 5. DELETE
+        // 5. GET BY CATEGORY ID
+        [HttpGet("category/{categoryId}")]
+        public async Task<IActionResult> GetByCategoryId(int categoryId)
+        {
+            var products = await _productService.GetByCategoryIdAsync(categoryId);
+            return Ok(products);
+        }
+
+        // 6. DELETE
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {

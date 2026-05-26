@@ -32,6 +32,7 @@ namespace CoffeeShop.Data
             modelBuilder.Entity<OrderItem>()
                 .Property(oi => oi.Price)
                 .HasPrecision(18, 2);
+
         }
     }
 }

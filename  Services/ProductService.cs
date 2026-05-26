@@ -111,6 +111,14 @@ namespace CoffeeShop.Services
                 .FirstOrDefaultAsync(p => p.Id == id);
         }
 
+        public async Task<List<Product>> GetByCategoryIdAsync(int categoryId)
+        {
+            return await _context.Products
+                .Include(p => p.Category)
+                .Where(p => p.CategoryId == categoryId)
+                .ToListAsync();
+        }
+
         // 5. DELETE PRODUCT
         public async Task<bool> DeleteAsync(int id)
         {
