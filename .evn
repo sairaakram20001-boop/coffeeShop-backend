@@ -1,0 +1,5 @@
+
+DB_CONNECTION=Server=sql1003.site4now.net;Database=db_aca257_coffeeshopdb;User Id=db_aca257_coffeeshopdb_admin;Password=CoffeeShop@2026#;TrustServerCertificate=True;
+
+FRONTEND_URL=https://yourfrontend.netlify.app
+
