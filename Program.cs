@@ -5,9 +5,12 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json.Serialization; // Required for ReferenceHandler
+using Microsoft.Extensions.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
 const string FrontendCorsPolicy = "FrontendCorsPolicy";
+
+LoadDotEnv(Path.Combine(builder.Environment.ContentRootPath, ".env"), builder.Configuration);
 
 // Avoid Windows EventLog permission issues in local dev environments.
 builder.Logging.ClearProviders();
@@ -24,10 +27,19 @@ builder.Services.AddControllers()
     });
 
 // 2. DB Context
+var dbConnection = builder.Configuration["DB_CONNECTION"];
+if (string.IsNullOrWhiteSpace(dbConnection))
+{
+    dbConnection = builder.Configuration.GetConnectionString("DefaultConnection");
+}
+
+if (string.IsNullOrWhiteSpace(dbConnection))
+{
+    throw new Exception("Database connection string is missing.");
+}
+
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection")
-    )
+    options.UseSqlServer(dbConnection)
 );
 
 // 3. JWT Authentication
@@ -71,6 +83,15 @@ builder.Services.AddCors(options =>
             .Get<string[]>()
             ?? Array.Empty<string>();
 
+        var frontendUrl = builder.Configuration["FRONTEND_URL"];
+        if (!string.IsNullOrWhiteSpace(frontendUrl))
+        {
+            configuredOrigins = configuredOrigins
+                .Append(frontendUrl.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
         if (configuredOrigins.Length > 0)
         {
             policy.WithOrigins(configuredOrigins)
@@ -109,3 +130,41 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+static void LoadDotEnv(string envPath, ConfigurationManager configuration)
+{
+    if (!File.Exists(envPath))
+    {
+        return;
+    }
+
+    var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+    foreach (var rawLine in File.ReadAllLines(envPath))
+    {
+        var line = rawLine.Trim();
+        if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#"))
+        {
+            continue;
+        }
+
+        var separatorIndex = line.IndexOf('=');
+        if (separatorIndex <= 0)
+        {
+            continue;
+        }
+
+        var key = line[..separatorIndex].Trim();
+        var value = line[(separatorIndex + 1)..].Trim().Trim('"');
+
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            values[key] = value;
+        }
+    }
+
+    if (values.Count > 0)
+    {
+        configuration.AddInMemoryCollection(values);
+    }
+}

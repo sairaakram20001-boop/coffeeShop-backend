@@ -1,14 +1,7 @@
 {
   "ConnectionStrings": {
 
-    "DefaultConnection": "Server=sql1003.site4now.net;Database=db_aca257_coffeeshopdb;User Id=db_aca257_coffeeshopdb_admin;Password=CoffeeShop@2026#;TrustServerCertificate=True;"
-  },
-
-
-  "Cors": {
-    "AllowedOrigins": [
-      "https://coffeeshop-backend-production.up.railway.app"
-    ]
+    "DefaultConnection": "Server=localhost\\SQLEXPRESS;Database=CoffeeShopDB;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False;"
   },
 
 
