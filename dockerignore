@@ -1,0 +1,13 @@
+**/.dockerignore
+**/.git
+**/.gitignore
+**/.vs
+**/.vscode
+**/bin
+**/obj
+**/out
+**/.idea
+**/node_modules
+**/*.user
+**/*.suo
+**/appsettings.Development.json
